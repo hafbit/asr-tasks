@@ -1,0 +1,44 @@
+name: asr-tasks
+
+x-common: &common
+  image: ${ASR_IMAGE:-ghcr.io/hafbit/asr-tasks:latest}
+  build:
+    context: .
+    target: runtime
+    platforms:
+      - linux/amd64
+  platform: linux/amd64
+  environment: &environment
+    ASR_API_TOKEN: ${ASR_API_TOKEN:?Set ASR_API_TOKEN}
+    ASR_DATA_DIR: /data
+    ASR_WORKER_COUNT: ${ASR_WORKER_COUNT:-1}
+    ASR_CPU_THREADS: ${ASR_CPU_THREADS:-4}
+    ASR_SOURCE_URL_ALLOWED_HOSTS: ${ASR_SOURCE_URL_ALLOWED_HOSTS:-}
+  volumes:
+    - asr-data:/data
+  restart: unless-stopped
+
+services:
+  asr-tasks:
+    <<: *common
+    command: ["all"]
+    ports:
+      - "${ASR_PORT:-8000}:8000"
+
+  api:
+    <<: *common
+    profiles: ["split"]
+    command: ["api"]
+    environment:
+      <<: *environment
+      ASR_WORKER_COUNT: "1"
+    ports:
+      - "${ASR_PORT:-8000}:8000"
+
+  worker:
+    <<: *common
+    profiles: ["split"]
+    command: ["worker"]
+
+volumes:
+  asr-data:

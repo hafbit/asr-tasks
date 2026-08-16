@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [latest]
+  push:
+    branches: [latest]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: asr-tasks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.11.14"
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run pytest
+      - name: Verify migrations
+        env:
+          ASR_DATA_DIR: ${{ runner.temp }}/migration-check
+        run: |
+          uv run alembic upgrade head
+          uv run alembic current
+          uv run alembic check
+          uv run alembic downgrade base
+
+  images:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: runtime
+            image: ghcr.io/hafbit/asr-tasks
+          - target: full
+            image: ghcr.io/hafbit/asr-tasks-full
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build ${{ matrix.target }} image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --target "${{ matrix.target }}" \
+            --cache-from "type=gha,scope=${{ matrix.target }}" \
+            --cache-to "type=gha,mode=max,scope=${{ matrix.target }}" \
+            --load \
+            --tag "asr-tasks:${{ matrix.target }}-ci" \
+            .
+      - name: Validate common image properties
+        run: |
+          test "$(docker image inspect "asr-tasks:${{ matrix.target }}-ci" --format '{{.Architecture}}')" = "amd64"
+          test "$(docker image inspect "asr-tasks:${{ matrix.target }}-ci" --format '{{.Config.User}}')" = "asr"
+          docker run --rm --entrypoint python "asr-tasks:${{ matrix.target }}-ci" -c \
+            'import importlib.metadata, torch; assert "+cpu" in torch.__version__; print("funasr=%s torch=%s" % (importlib.metadata.version("funasr"), torch.__version__))'
+      - name: Validate runtime image has no models
+        if: matrix.target == 'runtime'
+        run: |
+          docker run --rm --entrypoint sh "asr-tasks:${{ matrix.target }}-ci" -c \
+            'test ! -e /opt/asr-models && test ! -e /data/models/iic'
+      - name: Validate full image offline
+        if: matrix.target == 'full'
+        run: |
+          docker run -d --name asr-tasks-full-smoke --network none \
+            -e ASR_ALLOW_UNAUTHENTICATED=true \
+            -e ASR_CPU_THREADS=2 \
+            "asr-tasks:${{ matrix.target }}-ci"
+          docker cp scripts/full-image-smoke.sh asr-tasks-full-smoke:/tmp/full-image-smoke.sh
+          for attempt in $(seq 1 180); do
+            if docker exec asr-tasks-full-smoke curl -fsS http://127.0.0.1:8000/health/ready; then
+              break
+            fi
+            if [ "$attempt" -eq 180 ]; then
+              docker logs asr-tasks-full-smoke
+              exit 1
+            fi
+            sleep 5
+          done
+          docker exec asr-tasks-full-smoke sh /tmp/full-image-smoke.sh
+      - name: Show full image logs
+        if: failure() && matrix.target == 'full'
+        run: docker logs asr-tasks-full-smoke || true
+      - name: Clean up full image smoke container
+        if: always() && matrix.target == 'full'
+        run: docker rm -f asr-tasks-full-smoke || true
+      - uses: docker/login-action@v4
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish image
+        if: github.event_name == 'push'
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "branch" ]; then
+            image_tag=latest
+          else
+            image_tag="${GITHUB_REF_NAME#v}"
+          fi
+          docker tag "asr-tasks:${{ matrix.target }}-ci" "$IMAGE:$image_tag"
+          docker push "$IMAGE:$image_tag"
