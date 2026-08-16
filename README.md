@@ -55,7 +55,7 @@ curl -H 'Authorization: Bearer change-me' \
 ```bash
 curl -H 'Authorization: Bearer change-me' \
   -H 'Content-Type: application/json' \
-  -d '{"asset_id":"<asset-id>","hotwords":["万维灵枢","hafbit"]}' \
+  -d '{"asset_id":"<asset-id>","hotwords":["量子计算","深度学习"]}' \
   http://localhost:8000/v1/transcription-jobs
 ```
 

@@ -20,8 +20,8 @@ class FakeEngine:
         return [(0, midpoint), (midpoint, duration_ms)]
 
     def transcribe_batch(self, audio: list[np.ndarray], *, hotwords: list[str]) -> list[str]:
-        assert "万维灵枢" in hotwords
-        return ["万维灵书"] * len(audio)
+        assert "深度学习" in hotwords
+        return ["深度学席"] * len(audio)
 
     def punctuate(self, text: str) -> str:
         return f"{text}。" if text else text
@@ -52,7 +52,7 @@ def test_worker_completes_job_and_exposes_result(settings, client, app, auth_hea
         )
         session.add(asset)
         session.flush()
-        job = TranscriptionJob(asset_id=asset.id, hotwords=["万维灵枢"])
+        job = TranscriptionJob(asset_id=asset.id, hotwords=["深度学习"])
         session.add(job)
         session.commit()
         job_id = job.id
@@ -70,7 +70,7 @@ def test_worker_completes_job_and_exposes_result(settings, client, app, auth_hea
     assert response.json()["status"] == JobStatus.SUCCEEDED.value
     assert response.json()["progress"] == 100
     result = client.get(f"/v1/transcription-jobs/{job_id}/result", headers=auth_headers).json()
-    assert result["text"] == "万维灵枢万维灵枢。"
+    assert result["text"] == "深度学习深度学习。"
     assert len(result["segments"]) == 2
 
 
@@ -89,7 +89,7 @@ def test_worker_resumes_after_completed_batch(settings, app) -> None:  # type: i
         )
         session.add(asset)
         session.flush()
-        job = TranscriptionJob(asset_id=asset.id, hotwords=["万维灵枢"])
+        job = TranscriptionJob(asset_id=asset.id, hotwords=["深度学习"])
         session.add(job)
         session.flush()
         session.add_all(
@@ -123,4 +123,4 @@ def test_worker_resumes_after_completed_batch(settings, app) -> None:  # type: i
         job = session.get(TranscriptionJob, job_id)
         assert job is not None
         assert job.status == JobStatus.SUCCEEDED.value
-        assert job.result_text == "已完成批次万维灵枢。"
+        assert job.result_text == "已完成批次深度学习。"

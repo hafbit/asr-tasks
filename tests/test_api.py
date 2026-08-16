@@ -23,9 +23,9 @@ def test_upload_glossary_job_and_idempotency(client, app, auth_headers) -> None:
         "/v1/glossaries",
         headers=auth_headers,
         json={
-            "name": "产品词",
-            "hotwords": ["万维灵枢"],
-            "replacements": {"哈福比特": "hafbit"},
+            "name": "人工智能术语",
+            "hotwords": ["深度学习"],
+            "replacements": {"量子计蒜": "量子计算"},
         },
     )
     assert glossary_response.status_code == 201
